@@ -446,7 +446,13 @@ class ShenandoahGenerationStatsClosure : public ShenandoahHeapRegionClosure {
     if (adjust_for_deferred_accounting) {
       humongous_regions_promoted = heap->get_promotable_humongous_regions();
       size_t transferred_regions = humongous_regions_promoted;
-      generation_capacity += transferred_regions * ShenandoahHeapRegion::region_size_bytes();
+      if (generation->is_old()) {
+        // Promoted-in-place regions are labeled as old, but generation->soft_max_capacity() has not yet been increased
+        generation_capacity += transferred_regions * ShenandoahHeapRegion::region_size_bytes();
+      } else if (generation->is_young()) {
+        // Promoted-in-place regions are labeled as old, but generation->soft_max_capacity() has not yet been decreased
+        generation_capacity -= transferred_regions * ShenandoahHeapRegion::region_size_bytes();
+      }
     }
     guarantee(stats.span() <= generation_capacity,
               "%s: generation (%s) size spanned by regions (" SIZE_FORMAT ") must not exceed current capacity (" SIZE_FORMAT "%s)",
@@ -457,9 +463,16 @@ class ShenandoahGenerationStatsClosure : public ShenandoahHeapRegionClosure {
     if (adjust_for_deferred_accounting) {
       size_t promoted_humongous_bytes = heap->get_promotable_humongous_usage();
       size_t promoted_regions_span = humongous_regions_promoted * ShenandoahHeapRegion::region_size_bytes();
-      assert(promoted_regions_span > promoted_humongous_bytes, "sanity");
+      assert(promoted_regions_span >= promoted_humongous_bytes, "sanity");
       size_t promoted_waste = promoted_regions_span - promoted_humongous_bytes;
-      humongous_waste += promoted_waste;
+      if (generation->is_old()) {
+        // Promoted-in-place regions are labeled as old, but generation->get_humongous_waste() has not yet been increased
+        humongous_waste += promoted_waste;
+      } else if (generation->is_young()) {
+        // Promoted-in-place regions are labeled as old, but generation->get_humongous_waste() has not yet been decreased
+        assert(humongous_waste >= promoted_waste, "Cannot promote in place more waste than exists in young");
+        humongous_waste -= promoted_waste;
+      }
     }
     guarantee(stats.waste() == humongous_waste,
               "%s: generation (%s) humongous waste must be consistent: generation: " SIZE_FORMAT "%s, regions: " SIZE_FORMAT "%s",
@@ -1176,20 +1189,6 @@ void ShenandoahVerifier::verify_before_fullgc() {
           _verify_regions_disable,     // no reliable region data here
           _verify_size_disable,        // if we degenerate during evacuation, usage not valid: padding and deferred accounting
           _verify_gcstate_disable      // no reliable gcstate data
-  );
-}
-
-void ShenandoahVerifier::verify_after_generational_fullgc() {
-  verify_at_safepoint(
-          "After Full Generational GC",
-          _verify_remembered_after_full_gc,  // verify read-write remembered set
-          _verify_forwarded_none,      // all objects are non-forwarded
-          _verify_marked_complete,     // all objects are marked in complete bitmap
-          _verify_cset_none,           // no cset references
-          _verify_liveness_disable,    // no reliable liveness data anymore
-          _verify_regions_notrash_nocset, // no trash, no cset
-          _verify_size_exact,           // expect generation and heap sizes to match exactly
-          _verify_gcstate_stable       // full gc cleaned up everything
   );
 }
 

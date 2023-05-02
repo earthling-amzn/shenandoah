@@ -104,6 +104,7 @@ static int compare_by_aged_live(AgedRegionData a, AgedRegionData b) {
 size_t ShenandoahHeuristics::select_aged_regions(size_t old_available, size_t num_regions, bool preselected_regions[]) {
   assert(heap->mode()->is_generational(), "Only in generational mode");
   ShenandoahHeap* heap = ShenandoahHeap::heap();
+  assert(heap->mode()->is_generational(), "Only in generational mode");
   ShenandoahMarkingContext* const ctx = heap->marking_context();
   size_t old_consumed = 0;
   size_t promo_potential = 0;

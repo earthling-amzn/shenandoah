@@ -273,13 +273,13 @@ void ShenandoahOldHeuristics::prepare_for_old_collections() {
   // threshold for the old generation.
 
   // Unlike young, we are more interested in efficiently packing OLD-gen than in reclaiming garbage first.  We sort by live-data.
-  // Note that regular regions may be promoted in place with no garbage but also with very little live data.  When we "compact"
+  // Some regular regions may have been promoted in place with no garbage but also with very little live data.  When we "compact"
   // old-gen, we want to pack these underutilized regions together so we can have more unaffiliated (unfragmented) free regions
   // in old-gen.
   QuickSort::sort<RegionData>(candidates, cand_idx, compare_by_live, false);
 
-  // Any old-gen region that contains (ShenandoahOldGarbageThreshold (default value 25))% garbage or more is to
-  // be evacuated.
+  // Any old-gen region that contains (ShenandoahOldGarbageThreshold (default value 25)% garbage or more is to be
+  // added to the list of candidates for subsequent mixed evacuations.
   //
   // TODO: allow ShenandoahOldGarbageThreshold to be determined adaptively, by heuristics.
 
@@ -297,15 +297,16 @@ void ShenandoahOldHeuristics::prepare_for_old_collections() {
   size_t unfragmented = 0;
 
   for (size_t i = 0; i < cand_idx; i++) {
-    size_t region_garbage = candidates[i]._region->garbage();
-    size_t unused = ShenandoahHeapRegion::region_size_bytes() - candidates[i]._u._live_data;
-    if (unused < garbage_threshold) {
+    size_t live = candidates[i]._u._live_data;
+    if (live > live_threshold) {
       // Candidates are sorted in increasing order of live data, so no regions after this will be below the threshold.
       _last_old_collection_candidate = (uint)i;
       break;
     }
+    size_t region_garbage = candidates[i]._region->garbage();
+    size_t region_free = candidates[i]._region->free();
     candidates_garbage += region_garbage;
-    unfragmented += unused;
+    unfragmented += region_free;
   }
 
   // Note that we do not coalesce and fill occupied humongous regions
@@ -454,28 +455,19 @@ bool ShenandoahOldHeuristics::should_degenerate_cycle() {
 
 void ShenandoahOldHeuristics::record_success_concurrent(bool abbreviated) {
   // Forget any triggers that occured while OLD GC was ongoing.  If we really need to start another, it will retrigger.
-  _promotion_failed = false;
-  _cannot_expand_trigger = false;
-  _fragmentation_trigger = false;
-  _growth_trigger = false;
+  clear_triggers();
   _trigger_heuristic->record_success_concurrent(abbreviated);
 }
 
 void ShenandoahOldHeuristics::record_success_degenerated() {
   // Forget any triggers that occured while OLD GC was ongoing.  If we really need to start another, it will retrigger.
-  _promotion_failed = false;
-  _cannot_expand_trigger = false;
-  _fragmentation_trigger = false;
-  _growth_trigger = false;
+  clear_triggers();
   _trigger_heuristic->record_success_degenerated();
 }
 
 void ShenandoahOldHeuristics::record_success_full() {
   // Forget any triggers that occured while OLD GC was ongoing.  If we really need to start another, it will retrigger.
-  _promotion_failed = false;
-  _cannot_expand_trigger = false;
-  _fragmentation_trigger = false;
-  _growth_trigger = false;
+  clear_triggers();
   _trigger_heuristic->record_success_full();
 }
 
