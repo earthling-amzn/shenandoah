@@ -324,10 +324,7 @@ public:
     WEAK_ROOTS_BITPOS  = 4,
 
     // Old regions are under marking, still need SATB barriers.
-    OLD_MARKING_BITPOS = 5,
-
-    // Old (mixed) evacations are enabled.
-    MIXED_EVACUATIONS_ENABLED_BITPOS = 6
+    OLD_MARKING_BITPOS = 5
   };
 
   enum GCState {
@@ -337,8 +334,7 @@ public:
     EVACUATION    = 1 << EVACUATION_BITPOS,
     UPDATEREFS    = 1 << UPDATEREFS_BITPOS,
     WEAK_ROOTS    = 1 << WEAK_ROOTS_BITPOS,
-    OLD_MARKING   = 1 << OLD_MARKING_BITPOS,
-    MIXED_EVACUATIONS_ENABLED = 1 << MIXED_EVACUATIONS_ENABLED_BITPOS
+    OLD_MARKING   = 1 << OLD_MARKING_BITPOS
   };
 
 private:
@@ -462,6 +458,7 @@ public:
   // Returns previous value
   inline size_t set_promoted_reserve(size_t new_val);
   inline size_t get_promoted_reserve() const;
+  inline void augment_promo_reserve(size_t increment);
 
   inline void reset_promoted_expended();
   inline size_t expend_promoted(size_t increment);
@@ -471,6 +468,7 @@ public:
   // Returns previous value
   inline size_t set_old_evac_reserve(size_t new_val);
   inline size_t get_old_evac_reserve() const;
+  inline void augment_old_evac_reserve(size_t increment);
 
   inline void reset_old_evac_expended();
   inline size_t expend_old_evac(size_t increment);

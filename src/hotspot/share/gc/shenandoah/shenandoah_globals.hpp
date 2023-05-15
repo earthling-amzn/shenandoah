@@ -203,7 +203,7 @@
           "Heuristics may trigger collections more frequently. Time is in " \
           "milliseconds. Setting this to 0 disables the feature.")          \
                                                                             \
-  product(uintx, ShenandoahGuaranteedYoungGCInterval, 15*1000,  EXPERIMENTAL,  \
+  product(uintx, ShenandoahGuaranteedYoungGCInterval, 30*1000,  EXPERIMENTAL,  \
           "Run a collection of the young generation at least this often. "    \
           "Heuristics may trigger collections more frequently. Time is in " \
           "milliseconds. Setting this to 0 disables the feature.")          \
@@ -293,7 +293,7 @@
           "failures, which will trigger stop-the-world Full GC passes.")    \
           range(1.0,100.0)                                                  \
                                                                             \
-  product(double, ShenandoahOldEvacWaste, 1.6, EXPERIMENTAL,                \
+  product(double, ShenandoahOldEvacWaste, 1.4, EXPERIMENTAL,                \
           "How much waste evacuations produce within the reserved space. "  \
           "Larger values make evacuations more resilient against "          \
           "evacuation conflicts, at expense of evacuating less on each "    \
@@ -302,9 +302,9 @@
           range(1.0,100.0)                                                  \
                                                                             \
   product(double, ShenandoahPromoEvacWaste, 1.2, EXPERIMENTAL,              \
-          "How much waste evacuations produce within the reserved space. "  \
+          "How much waste promotions produce within the reserved space. "   \
           "Larger values make evacuations more resilient against "          \
-          "evacuation conflicts, at expense of evacuating less on each "    \
+          "evacuation conflicts, at expense of promoting less on each "     \
           "GC cycle.  Smaller values increase the risk of evacuation "      \
           "failures, which will trigger stop-the-world Full GC passes.")    \
           range(1.0,100.0)                                                  \

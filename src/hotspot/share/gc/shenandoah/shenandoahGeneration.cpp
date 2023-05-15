@@ -672,7 +672,6 @@ void ShenandoahGeneration::increase_humongous_waste(size_t bytes) {
 
 void ShenandoahGeneration::decrease_humongous_waste(size_t bytes) {
   if (bytes > 0) {
-    assert(_humongous_waste >= bytes, "Waste cannot be negative");
     assert(ShenandoahHeap::heap()->is_full_gc_in_progress() || (_humongous_waste >= bytes),
            "Waste (" SIZE_FORMAT ") cannot be negative (after subtracting " SIZE_FORMAT ")", _humongous_waste, bytes);
     Atomic::sub(&_humongous_waste, bytes);
