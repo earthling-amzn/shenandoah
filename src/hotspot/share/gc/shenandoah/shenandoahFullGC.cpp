@@ -180,9 +180,9 @@ void ShenandoahFullGC::op_full(GCCause::Cause cause) {
 
     // Since we allow temporary violation of these constraints during Full GC, we want to enforce that the assertions are
     // made valid by the time Full GC completes.
-    assert(heap->old_generation()->used_regions_size() <= heap->old_generation()->soft_max_capacity(),
+    assert(heap->old_generation()->used_regions_size() <= heap->old_generation()->max_capacity(),
            "Old generation affiliated regions must be less than capacity");
-    assert(heap->young_generation()->used_regions_size() <= heap->young_generation()->soft_max_capacity(),
+    assert(heap->young_generation()->used_regions_size() <= heap->young_generation()->max_capacity(),
            "Young generation affiliated regions must be less than capacity");
 
     assert((heap->young_generation()->used() + heap->young_generation()->get_humongous_waste())
@@ -1521,8 +1521,6 @@ void ShenandoahFullGC::phase5_epilog() {
     size_t young_cset_regions, old_cset_regions;
     heap->free_set()->prepare_to_rebuild(young_cset_regions, old_cset_regions);
 
-    // We do not separately promote humongous after Full GC.  These have been handled by separate mechanism.
-
     // We also do not expand old generation size following Full GC because we have scrambled age populations and
     // no longer have objects separated by age into distinct regions.
 
@@ -1539,7 +1537,7 @@ void ShenandoahFullGC::phase5_epilog() {
       // Invoke this in case we are able to transfer memory from OLD to YOUNG.
       heap->adjust_generation_sizes_for_next_cycle(0, 0, 0);
     }
-    heap->free_set()->rebuild();
+    heap->free_set()->rebuild(young_cset_regions, old_cset_regions);
   }
   heap->clear_cancelled_gc(true /* clear oom handler */);
 }

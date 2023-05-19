@@ -383,7 +383,7 @@ jint ShenandoahHeap::initialize() {
 
     // We are initializing free set.  We ignore cset region tallies.
     _free_set->prepare_to_rebuild(young_cset_regions, old_cset_regions);
-    _free_set->rebuild();
+    _free_set->rebuild(young_cset_regions, old_cset_regions);
   }
 
   if (AlwaysPreTouch) {
@@ -515,7 +515,7 @@ void ShenandoahHeap::initialize_heuristics_generations() {
   // allowed for old and young could exceed the total heap size. It remains the case that the
   // _actual_ capacity of young + old = total.
   if (strcmp(ShenandoahGCMode, "generational") == 0) {
-    _generation_sizer.heap_size_changed(soft_max_capacity());
+    _generation_sizer.heap_size_changed(max_capacity());
     size_t initial_capacity_young = _generation_sizer.max_young_size();
     size_t max_capacity_young = _generation_sizer.max_young_size();
     size_t initial_capacity_old = max_capacity() - max_capacity_young;
@@ -523,15 +523,15 @@ void ShenandoahHeap::initialize_heuristics_generations() {
 
     _young_generation = new ShenandoahYoungGeneration(_max_workers, max_capacity_young, initial_capacity_young);
     _old_generation = new ShenandoahOldGeneration(_max_workers, max_capacity_old, initial_capacity_old);
-    _global_generation = new ShenandoahGlobalGeneration(true, _max_workers, soft_max_capacity(), soft_max_capacity());
+    _global_generation = new ShenandoahGlobalGeneration(true, _max_workers, max_capacity(), max_capacity());
     _global_generation->initialize_heuristics(_gc_mode);
     _young_generation->initialize_heuristics(_gc_mode);
     _old_generation->initialize_heuristics(_gc_mode);
 
   } else {
-    _young_generation = new ShenandoahYoungGeneration(_max_workers, soft_max_capacity(), soft_max_capacity());
+    _young_generation = new ShenandoahYoungGeneration(_max_workers, max_capacity(), max_capacity());
     _old_generation = new ShenandoahOldGeneration(_max_workers, 0L, 0L);
-    _global_generation = new ShenandoahGlobalGeneration(false, _max_workers, soft_max_capacity(), soft_max_capacity());
+    _global_generation = new ShenandoahGlobalGeneration(false, _max_workers, max_capacity(), max_capacity());
     _global_generation->initialize_heuristics(_gc_mode);
   }
 }
@@ -588,6 +588,8 @@ ShenandoahHeap::ShenandoahHeap(ShenandoahCollectorPolicy* policy) :
   _gc_timer(new ConcurrentGCTimer()),
   _soft_ref_policy(),
   _log_min_obj_alignment_in_bytes(LogMinObjAlignmentInBytes),
+  _old_regions_surplus(0),
+  _old_regions_deficit(0),
   _marking_context(nullptr),
   _bitmap_size(0),
   _bitmap_regions_per_slice(0),
@@ -826,6 +828,8 @@ void ShenandoahHeap::set_soft_max_capacity(size_t v) {
          min_capacity(), v, max_capacity());
   Atomic::store(&_soft_max_size, v);
 
+#ifdef KELVIN_DEPRECATE
+  // soft_max affects heuristic triggers, but has no impact on generation sizes
   if (mode()->is_generational()) {
     _generation_sizer.heap_size_changed(_soft_max_size);
     size_t soft_max_capacity_young = _generation_sizer.max_young_size();
@@ -833,6 +837,7 @@ void ShenandoahHeap::set_soft_max_capacity(size_t v) {
     _young_generation->set_soft_max_capacity(soft_max_capacity_young);
     _old_generation->set_soft_max_capacity(soft_max_capacity_old);
   }
+#endif
 }
 
 size_t ShenandoahHeap::min_capacity() const {
@@ -3064,41 +3069,6 @@ void ShenandoahHeap::rebuild_free_set(bool concurrent) {
   _free_set->prepare_to_rebuild(young_cset_regions, old_cset_regions);
 
   if (mode()->is_generational()) {
-#ifdef KELVIN_DEPRECATE
-    // Promote aged humongous regions.  We know that all of the regions to be transferred exist in young.
-    size_t humongous_regions_promoted = get_promotable_humongous_regions();
-    size_t humongous_bytes_promoted = get_promotable_humongous_usage();
-    size_t humongous_waste_promoted =
-      humongous_regions_promoted * ShenandoahHeapRegion::region_size_bytes() - humongous_bytes_promoted;
-    size_t regular_regions_promoted_in_place = get_regular_regions_promoted_in_place();
-    size_t total_regions_promoted = humongous_regions_promoted;
-    size_t bytes_promoted_in_place = 0;
-    if (total_regions_promoted > 0) {
-      bytes_promoted_in_place = humongous_bytes_promoted;
-      log_info(gc, ergo)("Promoted " SIZE_FORMAT " humongous and " SIZE_FORMAT " regular regions in place"
-                         ", representing total usage of " SIZE_FORMAT,
-                         humongous_regions_promoted, regular_regions_promoted_in_place, bytes_promoted_in_place);
-      size_t free_old_regions = old_generation()->free_unaffiliated_regions();
-      // usage, affiliated region counts, and humongous waste are now accounted when the regions are promoted
-
-      // Decrease usage within young before we transfer capacity to old in order to avoid certain assertion failures.
-      young_generation()->decrease_humongous_waste(humongous_waste_promoted);
-      young_generation()->decrease_used(bytes_promoted_in_place);
-      young_generation()->decrease_affiliated_region_count(total_regions_promoted);
-
-      if (free_old_regions < total_regions_promoted) {
-        // Regions that were promoted in place were transferred at the time they were promoted.
-        size_t needed_regions = total_regions_promoted - free_old_regions;
-        generation_sizer()->force_transfer_to_old(needed_regions);
-      }
-
-      // usage, affiliated region counts, and humongous waste are now accounted when the regions are promoted
-
-      old_generation()->increase_affiliated_region_count(total_regions_promoted);
-      old_generation()->increase_used(bytes_promoted_in_place);
-      old_generation()->increase_humongous_waste(humongous_waste_promoted);
-    }
-#endif
     assert(verify_generation_usage(true, old_generation()->used_regions(),
                                    old_generation()->used(), old_generation()->get_humongous_waste(),
                                    true, young_generation()->used_regions(),
@@ -3119,20 +3089,15 @@ void ShenandoahHeap::rebuild_free_set(bool concurrent) {
     // within partially consumed regions of memory.
   }
   // Rebuild free set based on adjusted generation sizes.
-  _free_set->rebuild();
+  _free_set->rebuild(young_cset_regions, old_cset_regions);
 
   if (mode()->is_generational()) {
     size_t old_available = old_generation()->available();
     size_t old_unaffiliated_available = old_generation()->free_unaffiliated_regions() * region_size_bytes;
     size_t old_fragmented_available;
     assert(old_available >= old_unaffiliated_available, "unaffiliated available is a subset of total available");
-    if (old_available >= old_unaffiliated_available) {
-      old_fragmented_available = old_available - old_unaffiliated_available;
-    } else {
-      // WE SHOULD NOT NEED THIS CONDITIONAL CODE, BUT KELVIN HAS NOT
-      // YET FIGURED OUT HOW THIS CONDITION IS VIOLATED.
-      old_fragmented_available = 0;
-    }
+    old_fragmented_available = old_available - old_unaffiliated_available;
+
     size_t old_capacity = old_generation()->max_capacity();
     size_t heap_capacity = capacity();
     if ((old_capacity > heap_capacity / 8) && (old_fragmented_available > old_capacity / 8)) {
