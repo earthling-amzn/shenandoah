@@ -197,7 +197,9 @@ bool ShenandoahConcurrentGC::collect(GCCause::Cause cause) {
     // Concurrently evacuate
     entry_evacuate();
     if (check_cancellation_and_abort(ShenandoahDegenPoint::_degenerated_evac)) return false;
+  }
 
+  if (heap->has_forwarded_objects()) {
     // Perform update-refs phase.
     vmop_entry_init_updaterefs();
     entry_updaterefs();
@@ -766,7 +768,6 @@ void ShenandoahConcurrentGC::op_final_mark() {
     heap->prepare_concurrent_roots();
 
     if (heap->mode()->is_generational()) {
-      ShenandoahGeneration* young_gen = heap->young_generation();
       size_t humongous_regions_promoted = heap->get_promotable_humongous_regions();
       size_t regular_regions_promoted_in_place = heap->get_regular_regions_promoted_in_place();
       if (!heap->collection_set()->is_empty() || (humongous_regions_promoted + regular_regions_promoted_in_place > 0)) {
@@ -787,7 +788,7 @@ void ShenandoahConcurrentGC::op_final_mark() {
 
         heap->set_evacuation_in_progress(true);
         // From here on, we need to update references.
-        heap->set_has_forwarded_objects(true);
+        heap->set_has_forwarded_objects(!heap->collection_set()->is_empty());
 
         // Verify before arming for concurrent processing.
         // Otherwise, verification can trigger stack processing.
@@ -1286,7 +1287,8 @@ void ShenandoahConcurrentGC::op_final_roots() {
     }
   }
 
-  ShenandoahHeap::heap()->set_concurrent_weak_root_in_progress(false);
+  heap->set_evacuation_in_progress(false);
+  heap->set_concurrent_weak_root_in_progress(false);
 }
 
 void ShenandoahConcurrentGC::op_cleanup_complete() {

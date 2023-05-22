@@ -255,6 +255,10 @@ void ShenandoahDegenGC::op_degenerated() {
         }
       }
 
+      heap->set_evacuation_in_progress(false);
+      heap->set_concurrent_weak_root_in_progress(false);
+      heap->set_concurrent_strong_root_in_progress(false);
+
       // If heuristics thinks we should do the cycle, this flag would be set,
       // and we need to do update-refs. Otherwise, it would be the shortcut cycle.
       if (heap->has_forwarded_objects()) {
@@ -395,7 +399,7 @@ void ShenandoahDegenGC::op_prepare_evacuation() {
     }
 
     heap->set_evacuation_in_progress(true);
-    heap->set_has_forwarded_objects(true);
+    heap->set_has_forwarded_objects(!heap->collection_set()->is_empty());
 
     if(ShenandoahVerify) {
       heap->verifier()->verify_during_evacuation();
@@ -427,10 +431,6 @@ void ShenandoahDegenGC::op_evacuate() {
 void ShenandoahDegenGC::op_init_updaterefs() {
   // Evacuation has completed
   ShenandoahHeap* const heap = ShenandoahHeap::heap();
-  heap->set_evacuation_in_progress(false);
-  heap->set_concurrent_weak_root_in_progress(false);
-  heap->set_concurrent_strong_root_in_progress(false);
-
   heap->prepare_update_heap_references(false /*concurrent*/);
   heap->set_update_refs_in_progress(true);
 }

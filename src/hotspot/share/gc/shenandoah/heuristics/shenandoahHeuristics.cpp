@@ -367,10 +367,13 @@ void ShenandoahHeuristics::choose_collection_set(ShenandoahCollectionSet* collec
       old_heuristics->prime_collection_set(collection_set);
     } else {
       // This is a global collection and does not need to prime cset
+      assert(_generation->is_global(), "Expected global collection here");
     }
 
     // Call the subclasses to add young-gen regions into the collection set.
-    choose_collection_set_from_regiondata(collection_set, candidates, cand_idx, immediate_garbage + free);
+    if ((preselected_candidates > 0) || (immediate_percent <= ShenandoahImmediateThreshold)) {
+      choose_collection_set_from_regiondata(collection_set, candidates, cand_idx, immediate_garbage + free);
+    }
   } else {
     // We are going to skip evacuation and update refs because we reclaimed
     // sufficient amounts of immediate garbage.
