@@ -784,17 +784,19 @@ void ShenandoahConcurrentGC::op_final_mark() {
         if (ShenandoahVerify) {
           heap->verifier()->verify_before_evacuation();
         }
-        // TODO: we do not need to run update-references following evacuation if collection_set->is_empty().
 
         heap->set_evacuation_in_progress(true);
-        // From here on, we need to update references.
-        heap->set_has_forwarded_objects(!heap->collection_set()->is_empty());
 
         // Verify before arming for concurrent processing.
         // Otherwise, verification can trigger stack processing.
         if (ShenandoahVerify) {
           heap->verifier()->verify_during_evacuation();
         }
+
+        // Generational mode may promote objects in place during the evacuation phase.
+        // If that is the only reason we are evacuating, we don't need to update references
+        // and there will be no forwarded objects on the heap.
+        heap->set_has_forwarded_objects(!heap->collection_set()->is_empty());
 
         // Arm nmethods/stack for concurrent processing
         ShenandoahCodeRoots::arm_nmethods();
@@ -827,14 +829,15 @@ void ShenandoahConcurrentGC::op_final_mark() {
         }
 
         heap->set_evacuation_in_progress(true);
-        // From here on, we need to update references.
-        heap->set_has_forwarded_objects(true);
 
         // Verify before arming for concurrent processing.
         // Otherwise, verification can trigger stack processing.
         if (ShenandoahVerify) {
           heap->verifier()->verify_during_evacuation();
         }
+
+        // From here on, we need to update references.
+        heap->set_has_forwarded_objects(true);
 
         // Arm nmethods/stack for concurrent processing
         ShenandoahCodeRoots::arm_nmethods();
