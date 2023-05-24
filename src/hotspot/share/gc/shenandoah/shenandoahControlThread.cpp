@@ -859,8 +859,7 @@ void ShenandoahControlThread::service_uncommit(double shrink_before, size_t shri
 }
 
 bool ShenandoahControlThread::is_explicit_gc(GCCause::Cause cause) const {
-  return GCCause::is_user_requested_gc(cause) ||
-         GCCause::is_serviceability_requested_gc(cause);
+  return GCCause::is_explicit_full_gc(cause);
 }
 
 bool ShenandoahControlThread::is_implicit_gc(GCCause::Cause cause) const {
