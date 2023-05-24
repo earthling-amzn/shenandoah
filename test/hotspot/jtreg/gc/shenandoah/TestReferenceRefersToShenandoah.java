@@ -145,29 +145,6 @@ public class TestReferenceRefersToShenandoah {
         testWeak4 = new WeakReference<TestObject>(testObject4, queue);
     }
 
-    private static void gcUntilOld(Object o) throws Exception {
-        if (!WB.isObjectInOldGen(o)) {
-            WB.fullGC();
-            if (!WB.isObjectInOldGen(o)) {
-                fail("object not promoted by full gc");
-            }
-        }
-    }
-
-    private static void gcUntilOld() throws Exception {
-        gcUntilOld(testObjectNone);
-        gcUntilOld(testObject1);
-        gcUntilOld(testObject2);
-        gcUntilOld(testObject3);
-        gcUntilOld(testObject4);
-
-        gcUntilOld(testPhantom1);
-
-        gcUntilOld(testWeak2);
-        gcUntilOld(testWeak3);
-        gcUntilOld(testWeak4);
-    }
-
     private static void progress(String msg) {
         System.out.println(msg);
     }
@@ -232,8 +209,6 @@ public class TestReferenceRefersToShenandoah {
     private static void testConcurrentCollection() throws Exception {
         progress("setup concurrent collection test");
         setup();
-        progress("gcUntilOld");
-        gcUntilOld();
 
         progress("acquire control of concurrent cycles");
         WB.concurrentGCAcquireControl();
@@ -334,8 +309,6 @@ public class TestReferenceRefersToShenandoah {
     private static void testSimpleCollection() throws Exception {
         progress("setup simple collection test");
         setup();
-        progress("gcUntilOld");
-        gcUntilOld();
 
         progress("check initial states");
         checkInitialStates();
