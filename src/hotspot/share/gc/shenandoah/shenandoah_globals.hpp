@@ -203,8 +203,8 @@
           "Heuristics may trigger collections more frequently. Time is in " \
           "milliseconds. Setting this to 0 disables the feature.")          \
                                                                             \
-  product(uintx, ShenandoahGuaranteedYoungGCInterval, 30*1000,  EXPERIMENTAL,  \
-          "Run a collection of the young generation at least this often. "    \
+  product(uintx, ShenandoahGuaranteedYoungGCInterval, 5*60*1000,  EXPERIMENTAL,  \
+          "Run a collection of the young generation at least this often. "  \
           "Heuristics may trigger collections more frequently. Time is in " \
           "milliseconds. Setting this to 0 disables the feature.")          \
                                                                             \
@@ -420,6 +420,10 @@
   product(uintx, ShenandoahFullGCThreshold, 64, EXPERIMENTAL,               \
           "How many back-to-back Degenerated GCs should happen before "     \
           "going to a Full GC.")                                            \
+                                                                            \
+  product(uintx, ShenandoahOOMGCRetries, 3, EXPERIMENTAL,                   \
+          "How many GCs should happen before we throw OutOfMemoryException "\
+          "for allocation request, including at least one Full GC.")        \
                                                                             \
   product(bool, ShenandoahImplicitGCInvokesConcurrent, false, EXPERIMENTAL, \
           "Should internally-caused GC requests invoke concurrent cycles, " \

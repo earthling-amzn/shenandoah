@@ -799,8 +799,13 @@ void ShenandoahConcurrentGC::op_final_mark() {
         heap->set_has_forwarded_objects(!heap->collection_set()->is_empty());
 
         // Arm nmethods/stack for concurrent processing
-        ShenandoahCodeRoots::arm_nmethods();
-        ShenandoahStackWatermark::change_epoch_id();
+        if (!heap->collection_set()->is_empty()) {
+          // Iff objects will be evaluated, arm the nmethod barriers. These will be disarmed
+          // under the same condition (established in preprare_concurrent_roots) after strong
+          // root evacuation has completed (see op_strong_roots).
+          ShenandoahCodeRoots::arm_nmethods();
+          ShenandoahStackWatermark::change_epoch_id();
+        }
 
         if (ShenandoahPacing) {
           heap->pacer()->setup_for_evac();

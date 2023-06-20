@@ -87,6 +87,7 @@ public:
     _loc(nullptr),
     _generation(nullptr) {
     if (options._verify_marked == ShenandoahVerifier::_verify_marked_complete_except_references ||
+        options._verify_marked == ShenandoahVerifier::_verify_marked_complete_satb_empty ||
         options._verify_marked == ShenandoahVerifier::_verify_marked_disable) {
       set_ref_discoverer_internal(new ShenandoahIgnoreReferenceDiscoverer());
     }
@@ -257,6 +258,7 @@ private:
                "Must be marked in complete bitmap");
         break;
       case ShenandoahVerifier::_verify_marked_complete_except_references:
+      case ShenandoahVerifier::_verify_marked_complete_satb_empty:
         check(ShenandoahAsserts::_safe_all, obj, _heap->complete_marking_context()->is_marked_or_old(obj),
               "Must be marked in complete bitmap, except j.l.r.Reference referents");
         break;
@@ -403,29 +405,11 @@ class ShenandoahGenerationStatsClosure : public ShenandoahHeapRegionClosure {
                   byte_size_in_proper_unit(stats.used()),       proper_unit_for_byte_size(stats.used()));
   }
 
-  static void validate_usage(const bool adjust_for_padding, const bool adjust_for_deferred_accounting,
+  static void validate_usage(const bool adjust_for_padding,
                              const char* label, ShenandoahGeneration* generation, ShenandoahCalculateRegionStatsClosure& stats) {
     ShenandoahHeap* heap = ShenandoahHeap::heap();
     size_t generation_used = generation->used();
     size_t generation_used_regions = generation->used_regions();
-    if (adjust_for_deferred_accounting) {
-      ShenandoahGeneration* young_generation = heap->young_generation();
-      size_t humongous_regions_promoted = heap->get_promotable_humongous_regions();
-      size_t humongous_bytes_promoted = heap->get_promotable_humongous_usage();
-      size_t total_regions_promoted = humongous_regions_promoted;
-      size_t bytes_promoted_in_place = 0;
-      if (total_regions_promoted > 0) {
-        bytes_promoted_in_place = humongous_bytes_promoted;
-      }
-      if (generation->is_young()) {
-        generation_used -= bytes_promoted_in_place;
-        generation_used_regions -= total_regions_promoted;
-      } else if (generation->is_old()) {
-        generation_used += bytes_promoted_in_place;
-        generation_used_regions += total_regions_promoted;
-      }
-      // else, global validation doesn't care where the promoted-in-place data is tallied.
-    }
     if (adjust_for_padding && (generation->is_young() || generation->is_global())) {
       size_t pad = ShenandoahHeap::heap()->get_pad_for_promote_in_place();
       generation_used += pad;
@@ -443,37 +427,12 @@ class ShenandoahGenerationStatsClosure : public ShenandoahHeapRegionClosure {
 
     size_t generation_capacity = generation->max_capacity();
     size_t humongous_regions_promoted = 0;
-    if (adjust_for_deferred_accounting) {
-      humongous_regions_promoted = heap->get_promotable_humongous_regions();
-      size_t transferred_regions = humongous_regions_promoted;
-      if (generation->is_old()) {
-        // Promoted-in-place regions are labeled as old, but generation->max_capacity() has not yet been increased
-        generation_capacity += transferred_regions * ShenandoahHeapRegion::region_size_bytes();
-      } else if (generation->is_young()) {
-        // Promoted-in-place regions are labeled as old, but generation->max_capacity() has not yet been decreased
-        generation_capacity -= transferred_regions * ShenandoahHeapRegion::region_size_bytes();
-      }
-    }
     guarantee(stats.span() <= generation_capacity,
               "%s: generation (%s) size spanned by regions (" SIZE_FORMAT ") must not exceed current capacity (" SIZE_FORMAT "%s)",
               label, generation->name(), stats.regions(),
               byte_size_in_proper_unit(generation_capacity), proper_unit_for_byte_size(generation_capacity));
 
     size_t humongous_waste = generation->get_humongous_waste();
-    if (adjust_for_deferred_accounting) {
-      size_t promoted_humongous_bytes = heap->get_promotable_humongous_usage();
-      size_t promoted_regions_span = humongous_regions_promoted * ShenandoahHeapRegion::region_size_bytes();
-      assert(promoted_regions_span >= promoted_humongous_bytes, "sanity");
-      size_t promoted_waste = promoted_regions_span - promoted_humongous_bytes;
-      if (generation->is_old()) {
-        // Promoted-in-place regions are labeled as old, but generation->get_humongous_waste() has not yet been increased
-        humongous_waste += promoted_waste;
-      } else if (generation->is_young()) {
-        // Promoted-in-place regions are labeled as old, but generation->get_humongous_waste() has not yet been decreased
-        assert(humongous_waste >= promoted_waste, "Cannot promote in place more waste than exists in young");
-        humongous_waste -= promoted_waste;
-      }
-    }
     guarantee(stats.waste() == humongous_waste,
               "%s: generation (%s) humongous waste must be consistent: generation: " SIZE_FORMAT "%s, regions: " SIZE_FORMAT "%s",
               label, generation->name(),
@@ -640,6 +599,20 @@ public:
   }
 };
 
+class ShenandoahVerifyNoIncompleteSatbBuffers : public ThreadClosure {
+public:
+  virtual void do_thread(Thread* thread) {
+    SATBMarkQueue& queue = ShenandoahThreadLocalData::satb_mark_queue(thread);
+    if (!is_empty(queue)) {
+      fatal("All SATB buffers should have been flushed during mark");
+    }
+  }
+private:
+  bool is_empty(SATBMarkQueue& queue) {
+    return queue.buffer() == nullptr || queue.index() == queue.capacity();
+  }
+};
+
 class ShenandoahVerifierMarkedRegionTask : public WorkerTask {
 private:
   const char* _label;
@@ -665,6 +638,10 @@ public:
           _claimed(0),
           _processed(0),
           _generation(nullptr) {
+    if (_options._verify_marked == ShenandoahVerifier::_verify_marked_complete_satb_empty) {
+      Threads::change_thread_claim_token();
+    }
+
     if (_heap->mode()->is_generational()) {
       _generation = _heap->active_generation();
       assert(_generation != nullptr, "Expected active generation in this mode.");
@@ -676,6 +653,11 @@ public:
   }
 
   virtual void work(uint worker_id) {
+    if (_options._verify_marked == ShenandoahVerifier::_verify_marked_complete_satb_empty) {
+      ShenandoahVerifyNoIncompleteSatbBuffers verify_satb;
+      Threads::possibly_parallel_threads_do(true, &verify_satb);
+    }
+
     ShenandoahVerifierStack stack;
     ShenandoahVerifyOopClosure cl(&stack, _bitmap, _ld,
                                   ShenandoahMessageBuffer("%s, Marked", _label),
@@ -928,25 +910,14 @@ void ShenandoahVerifier::verify_at_safepoint(const char* label,
       ShenandoahGenerationStatsClosure::log_usage(_heap->young_generation(),  cl.young);
       ShenandoahGenerationStatsClosure::log_usage(_heap->global_generation(), cl.global);
     }
-
-#ifdef KELVIN_DEPRECATE
-    // I think I can also deprecate second argument to validate_usage:
-    // that is always false
-
-    if (sizeness == _verify_size_adjusted_for_deferred_accounting) {
-      ShenandoahGenerationStatsClosure::validate_usage(false, true, label, _heap->old_generation(), cl.old);
-      ShenandoahGenerationStatsClosure::validate_usage(false, true, label, _heap->young_generation(), cl.young);
-      ShenandoahGenerationStatsClosure::validate_usage(false, false, label, _heap->global_generation(), cl.global);
-    } else
-#endif
     if (sizeness == _verify_size_adjusted_for_padding) {
-      ShenandoahGenerationStatsClosure::validate_usage(false, false, label, _heap->old_generation(), cl.old);
-      ShenandoahGenerationStatsClosure::validate_usage(true, false, label, _heap->young_generation(), cl.young);
-      ShenandoahGenerationStatsClosure::validate_usage(true, false, label, _heap->global_generation(), cl.global);
+      ShenandoahGenerationStatsClosure::validate_usage(false, label, _heap->old_generation(), cl.old);
+      ShenandoahGenerationStatsClosure::validate_usage(true, label, _heap->young_generation(), cl.young);
+      ShenandoahGenerationStatsClosure::validate_usage(true, label, _heap->global_generation(), cl.global);
     } else if (sizeness == _verify_size_exact) {
-      ShenandoahGenerationStatsClosure::validate_usage(false, false, label, _heap->old_generation(), cl.old);
-      ShenandoahGenerationStatsClosure::validate_usage(false, false, label, _heap->young_generation(), cl.young);
-      ShenandoahGenerationStatsClosure::validate_usage(false, false, label, _heap->global_generation(), cl.global);
+      ShenandoahGenerationStatsClosure::validate_usage(false, label, _heap->old_generation(), cl.old);
+      ShenandoahGenerationStatsClosure::validate_usage(false, label, _heap->young_generation(), cl.young);
+      ShenandoahGenerationStatsClosure::validate_usage(false, label, _heap->global_generation(), cl.global);
     }
     // else: sizeness must equal _verify_size_disable
   }
@@ -999,7 +970,10 @@ void ShenandoahVerifier::verify_at_safepoint(const char* label,
   // version
 
   size_t count_marked = 0;
-  if (ShenandoahVerifyLevel >= 4 && (marked == _verify_marked_complete || marked == _verify_marked_complete_except_references)) {
+  if (ShenandoahVerifyLevel >= 4 &&
+        (marked == _verify_marked_complete ||
+         marked == _verify_marked_complete_except_references ||
+         marked == _verify_marked_complete_satb_empty)) {
     guarantee(_heap->marking_context()->is_complete(), "Marking context should be complete");
     ShenandoahVerifierMarkedRegionTask task(_verification_bit_map, ld, label, options);
     _heap->workers()->run_task(&task);
@@ -1085,7 +1059,7 @@ void ShenandoahVerifier::verify_after_concmark() {
           "After Mark",
           _verify_remembered_disable,  // do not verify remembered set
           _verify_forwarded_none,      // no forwarded references
-          _verify_marked_complete_except_references,
+          _verify_marked_complete_satb_empty,
                                        // bitmaps as precise as we can get, except dangling j.l.r.Refs
           _verify_cset_none,           // no references to cset anymore
           _verify_liveness_complete,   // liveness data must be complete here

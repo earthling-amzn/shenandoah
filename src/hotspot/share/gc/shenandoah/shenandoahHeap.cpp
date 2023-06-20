@@ -819,16 +819,6 @@ void ShenandoahHeap::set_soft_max_capacity(size_t v) {
          "Should be in bounds: " SIZE_FORMAT " <= " SIZE_FORMAT " <= " SIZE_FORMAT,
          min_capacity(), v, max_capacity());
   Atomic::store(&_soft_max_size, v);
-
-#ifdef KELVIN_DEPRECATE
-  // soft_max affects heuristic triggers, but has no impact on generation sizes
-  if (mode()->is_generational()) {
-    size_t max_capacity_young = _generation_sizer.max_young_size();
-    size_t min_capacity_young = _generation_sizer.min_young_size();
-    size_t new_capacity_young = clamp(v, min_capacity_young, max_capacity_young);
-    _young_generation->set_soft_max_capacity(new_capacity_young);
-  }
-#endif
 }
 
 size_t ShenandoahHeap::min_capacity() const {
@@ -1285,6 +1275,11 @@ HeapWord* ShenandoahHeap::allocate_new_gclab(size_t min_size,
 HeapWord* ShenandoahHeap::allocate_new_plab(size_t min_size,
                                             size_t word_size,
                                             size_t* actual_size) {
+  // Align requested sizes to card sized multiples
+  size_t words_in_card = CardTable::card_size_in_words();
+  size_t align_mask = ~(words_in_card - 1);
+  min_size = (min_size + words_in_card - 1) & align_mask;
+  word_size = (word_size + words_in_card - 1) & align_mask;
   ShenandoahAllocRequest req = ShenandoahAllocRequest::for_plab(min_size, word_size);
   // Note that allocate_memory() sets a thread-local flag to prohibit further promotions by this thread
   // if we are at risk of infringing on the old-gen evacuation budget.
@@ -1322,14 +1317,16 @@ HeapWord* ShenandoahHeap::allocate_memory(ShenandoahAllocRequest& req, bool is_p
     // strategy is to try again, as long as GC makes progress.
     //
     // Then, we need to make sure the allocation was retried after at least one
-    // Full GC, which means we want to try more than ShenandoahFullGCThreshold times.
+    // Full GC.
     size_t tries = 0;
+    size_t original_fullgc_count = shenandoah_policy()->get_fullgc_count();
     while (result == nullptr && _progress_last_gc.is_set()) {
       tries++;
       control_thread()->handle_alloc_failure(req);
       result = allocate_memory_under_lock(req, in_new_region, is_promotion);
     }
-    while (result == nullptr && tries <= ShenandoahFullGCThreshold) {
+    while (result == nullptr &&
+           ((shenandoah_policy()->get_fullgc_count() == original_fullgc_count) || (tries <= ShenandoahOOMGCRetries))) {
       tries++;
       control_thread()->handle_alloc_failure(req);
       result = allocate_memory_under_lock(req, in_new_region, is_promotion);
@@ -3074,10 +3071,10 @@ void ShenandoahHeap::rebuild_free_set(bool concurrent) {
                                    young_generation()->used(), young_generation()->get_humongous_waste()),
            "Generation accounts are inaccurate");
 
-    // The computation of evac_slack is quite conservative so consider all of this available for transfer to old.
-    // Note that transfer of humongous regions does not impact available.
-    size_t evac_slack = young_generation()->heuristics()->evac_slack(young_cset_regions);
-    adjust_generation_sizes_for_next_cycle(evac_slack, young_cset_regions, old_cset_regions);
+    // The computation of bytes_of_allocation_runway_before_gc_trigger is quite conservative so consider all of this
+    // available for transfer to old. Note that transfer of humongous regions does not impact available.
+    size_t allocation_runway = young_generation()->heuristics()->bytes_of_allocation_runway_before_gc_trigger(young_cset_regions);
+    adjust_generation_sizes_for_next_cycle(allocation_runway, young_cset_regions, old_cset_regions);
 
     // Total old_available may have been expanded to hold anticipated promotions.  We trigger if the fragmented available
     // memory represents more than 16 regions worth of data.  Note that fragmentation may increase when we promote regular

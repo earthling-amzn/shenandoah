@@ -88,7 +88,12 @@ public:
 
     // Objects should be marked in "complete" bitmap, except j.l.r.Reference referents, which
     // may be dangling after marking but before conc-weakrefs-processing.
-    _verify_marked_complete_except_references
+    _verify_marked_complete_except_references,
+
+    // Objects should be marked in "complete" bitmap, except j.l.r.Reference referents, which
+    // may be dangling after marking but before conc-weakrefs-processing. All SATB buffers must
+    // be empty.
+    _verify_marked_complete_satb_empty,
   } VerifyMarked;
 
   typedef enum {
@@ -149,11 +154,7 @@ public:
     _verify_size_exact,
 
     // Expect promote-in-place adjustments: padding inserted to temporarily prevent further allocation in regular regions
-    _verify_size_adjusted_for_padding,
-#ifdef KELVIN_DEPRECATE
-    // Expect promote-in-place adjustments: usage within regions promoted in place is transferred at end of update refs
-    _verify_size_adjusted_for_deferred_accounting
-#endif
+    _verify_size_adjusted_for_padding
   } VerifySize;
 
   typedef enum {

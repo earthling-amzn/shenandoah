@@ -354,6 +354,9 @@ private:
   // effort.  If this happens, the requesting thread blocks until some other thread manages to evacuate the offending object.
   // Only after "all" threads fail to evacuate an object do we consider the evacuation effort to have failed.
 
+  // How many full-gc cycles have been completed?
+  volatile size_t _completed_fullgc_cycles;
+
   size_t _promoted_reserve;            // Bytes reserved within old-gen to hold the results of promotion
   volatile size_t _promoted_expended;  // Bytes of old-gen memory expended on promotions
 
@@ -389,7 +392,6 @@ private:
   void set_gc_state_mask(uint mask, bool value);
 
 public:
-
   char gc_state() const;
   static address gc_state_addr();
 
