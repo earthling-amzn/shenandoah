@@ -1,0 +1,24 @@
+name: "Merge Latest Tag from Tip"
+on:
+  schedule:
+    - cron: '0 8 * * 4'
+  workflow_dispatch:
+    jobs:
+      merge-from-tip:
+      runs-on: ubuntu-latest
+      name: "Merge latest tag"
+      steps:
+        - name: "Checkout code"
+          uses: actions/checkout@v2
+          with:
+            fetch-depth: 0
+        - name: Reset the default branch with upstream changes
+          run: |
+            git remote add upstream https://github.com/owner/repo.git
+            git fetch upstream main:upstream-main
+            git reset --hard upstream-main
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.PAT }}
+          branch: upstream-changes
