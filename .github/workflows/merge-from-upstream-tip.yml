@@ -6,19 +6,27 @@ on:
 jobs:
   merge-from-tip:
     runs-on: ubuntu-latest
-    name: "Merge latest tag"
+    name: Merge latest tag
     steps:
-      - name: "Checkout code"
+      - name: Checkout code
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
-      - name: Reset the default branch with upstream changes
+      - name: Fetch latest tag
+        id: latest-tag
         run: |
           git remote add upstream https://github.com/openjdk/jdk.git
-          git fetch upstream master:upstream-master
-          git reset --hard upstream-master
+          git fetch upstream
+          echo "latest=$(git tag --list 'jdk-22*' --sort=-creatordate | head -1)" >> "$GITHUB_OUTPUT"
+      - name: Reset the default branch with latest tag
+        run: |
+          git reset --hard ${{ steps.latest-tag.outputs.latest }}
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
+          commit-message: Merge tag ${{ steps.latest-tag.outputs.latest }}
           token: ${{ secrets.WORKFLOWS }}
-          branch: upstream-changes
+          branch: merge-${{ steps.latest-tag.outputs.latest }}
+          delete-branch: true
+          title: Merge openjdk/jdk:master
+          body: Merges tag ${{ steps.latest-tag.outputs.latest }}
