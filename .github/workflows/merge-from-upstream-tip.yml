@@ -33,5 +33,6 @@ jobs:
           token: ${{ secrets.WORKFLOWS }}
           branch: merge-${{ steps.latest-tag.outputs.latest }}
           delete-branch: true
+          push-to-fork: ${{ github.repository }}
           title: Merge openjdk/jdk:master
           body: Merges tag ${{ steps.latest-tag.outputs.latest }}
