@@ -9,12 +9,12 @@ jobs:
     name: "Merge latest tag"
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           fetch-depth: 0
       - name: Reset the default branch with upstream changes
         run: |
-          git remote add upstream https://github.com/owner/repo.git
+          git remote add upstream https://github.com/openjdk/jdk.git
           git fetch upstream main:upstream-main
           git reset --hard upstream-main
       - name: Create Pull Request
