@@ -2,6 +2,7 @@ name: "Merge Latest Tag from Tip"
 on:
   schedule:
     - cron: '0 8 * * 4'
+  workflow_dispatch:
 jobs:
   merge-from-tip:
     runs-on: ubuntu-latest
