@@ -20,8 +20,7 @@ jobs:
           echo "latest=$(git tag --list 'jdk-22*' --sort=-creatordate | head -1)" >> "$GITHUB_OUTPUT"
       - name: Reset the default branch with latest tag
         run: |
-          git reset --hard e22762c010e5cd4c313e5f2816b67d75862935a7
-          # git reset --hard ${{ steps.latest-tag.outputs.latest }}
+          git reset --hard ${{ steps.latest-tag.outputs.latest }}
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
