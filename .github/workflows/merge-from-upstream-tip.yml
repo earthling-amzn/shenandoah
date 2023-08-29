@@ -30,7 +30,7 @@ jobs:
         uses: peter-evans/create-pull-request@v5
         with:
           commit-message: Merge tag ${{ steps.latest-tag.outputs.latest }}
-          token: ${{ secrets.WORKFLOWS }}
+          token: ${{ secrets.PAT }}
           branch: merge-${{ steps.latest-tag.outputs.latest }}
           delete-branch: true
           push-to-fork: ${{ github.repository }}
