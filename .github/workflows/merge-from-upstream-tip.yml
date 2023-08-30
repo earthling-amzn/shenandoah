@@ -4,12 +4,21 @@ on:
     - cron: '0 8 * * 4'
   workflow_dispatch:
 jobs:
+  # To create personal access tokens, go to account settings,
+  # then developer settings. Create a legacy token, give it
+  # access to repos and workflows and other sensible things.
+  # To then create a secret for the workflow, go to the
+  # repository settings and create a new secret with the text
+  # of the access token.
   merge-from-tip:
     # We only want this to run in one repo
     # if: github.repository == 'openjdk/shenandoah'
     runs-on: ubuntu-latest
     name: Merge latest tag
     steps:
+      # Note that we are checking out the upstream fork here.
+      # If this automation runs in openjdk/shenandoah, remove
+      # the token and repository arguments.
       - name: Checkout code
         uses: actions/checkout@v3
         with:
@@ -24,15 +33,21 @@ jobs:
           echo "latest=$(git tag --list 'jdk-22*' --sort=-creatordate | head -1)" >> "$GITHUB_OUTPUT"
       - name: Reset the default branch with latest tag
         run: |
-          git reset --hard e22762c010e5cd4c313e5f2816b67d75862935a7
-          #          git reset --hard ${{ steps.latest-tag.outputs.latest }}
+          git reset --hard ${{ steps.latest-tag.outputs.latest }}
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v5
         with:
           commit-message: Merge tag ${{ steps.latest-tag.outputs.latest }}
+          # Using the legacy personal access token seems to be
+          # required to create a pull request on a remote repo.
+          # We can revert this to a fine grained token when this
+          # workflow is running upstream.
           token: ${{ secrets.PAT }}
           branch: merge-${{ steps.latest-tag.outputs.latest }}
           delete-branch: true
+          # Without this, this action will attempt to push the
+          # new branch to the remote fork (i.e. openjdk/shenandoah).
+          # When this workflow runs in that repo, we can remove this.
           push-to-fork: ${{ github.repository }}
           title: Merge openjdk/jdk:master
           body: Merges tag ${{ steps.latest-tag.outputs.latest }}
