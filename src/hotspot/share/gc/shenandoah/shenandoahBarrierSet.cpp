@@ -46,14 +46,14 @@ ShenandoahBarrierSet::ShenandoahBarrierSet(ShenandoahHeap* heap, MemRegion heap_
   BarrierSet(make_barrier_set_assembler<ShenandoahBarrierSetAssembler>(),
              make_barrier_set_c1<ShenandoahBarrierSetC1>(),
              make_barrier_set_c2<ShenandoahBarrierSetC2>(),
-             ShenandoahNMethodBarrier ? new ShenandoahBarrierSetNMethod(heap) : nullptr,
+             new ShenandoahBarrierSetNMethod(heap),
              new ShenandoahBarrierSetStackChunk(),
              BarrierSet::FakeRtti(BarrierSet::ShenandoahBarrierSet)),
   _heap(heap),
   _satb_mark_queue_buffer_allocator("SATB Buffer Allocator", ShenandoahSATBBufferSize),
   _satb_mark_queue_set(&_satb_mark_queue_buffer_allocator)
 {
-  if (heap->mode()->is_generational()) {
+  if (ShenandoahCardBarrier) {
     _card_table = new ShenandoahCardTable(heap_region);
     _card_table->initialize();
   }
@@ -158,9 +158,7 @@ void ShenandoahBarrierSet::clone_barrier_runtime(oop src) {
 }
 
 void ShenandoahBarrierSet::write_ref_array(HeapWord* start, size_t count) {
-  if (!_heap->mode()->is_generational()) {
-    return;
-  }
+  assert(ShenandoahCardBarrier, "Did you mean to enable ShenandoahCardBarrier?");
 
   HeapWord* end = (HeapWord*)((char*) start + (count * heapOopSize));
   // In the case of compressed oops, start and end may potentially be misaligned;

@@ -487,9 +487,13 @@ jint ShenandoahHeap::initialize() {
   _control_thread = new ShenandoahControlThread();
   _regulator_thread = new ShenandoahRegulatorThread(_control_thread);
 
-  ShenandoahInitLogger::print();
+  print_init_logger();
 
   return JNI_OK;
+}
+
+void ShenandoahHeap::print_init_logger() const {
+  ShenandoahInitLogger::print();
 }
 
 size_t ShenandoahHeap::max_size_for(ShenandoahGeneration* generation) const {
@@ -582,7 +586,6 @@ ShenandoahHeap::ShenandoahHeap(ShenandoahCollectorPolicy* policy) :
   _prepare_for_old_mark(false),
   _initial_size(0),
   _promotion_potential(0),
-  _promotion_in_place_potential(0),
   _committed(0),
   _max_workers(MAX3(ConcGCThreads, ParallelGCThreads, 1U)),
   _workers(nullptr),
@@ -726,6 +729,9 @@ void ShenandoahHeap::post_initialize() {
   JFR_ONLY(ShenandoahJFRSupport::register_jfr_type_serializers());
 }
 
+ShenandoahHeuristics* ShenandoahHeap::heuristics() {
+  return _global_generation->heuristics();
+}
 
 ShenandoahOldHeuristics* ShenandoahHeap::old_heuristics() {
   return (ShenandoahOldHeuristics*) _old_generation->heuristics();
@@ -1336,23 +1342,15 @@ HeapWord* ShenandoahHeap::allocate_memory(ShenandoahAllocRequest& req, bool is_p
     // It might happen that one of the threads requesting allocation would unblock
     // way later after GC happened, only to fail the second allocation, because
     // other threads have already depleted the free storage. In this case, a better
-    // strategy is to try again, as long as GC makes progress.
-    //
-    // Then, we need to make sure the allocation was retried after at least one
-    // Full GC.
-    size_t tries = 0;
-    size_t original_fullgc_count = shenandoah_policy()->get_fullgc_count();
-    while (result == nullptr && _progress_last_gc.is_set()) {
-      tries++;
+    // strategy is to try again, as long as GC makes progress (or until at least
+    // one full GC has completed).
+    size_t original_count = shenandoah_policy()->full_gc_count();
+    while (result == nullptr
+        && (_progress_last_gc.is_set() || original_count == shenandoah_policy()->full_gc_count())) {
       control_thread()->handle_alloc_failure(req);
       result = allocate_memory_under_lock(req, in_new_region, is_promotion);
     }
-    while (result == nullptr &&
-           ((shenandoah_policy()->get_fullgc_count() == original_fullgc_count) || (tries <= ShenandoahOOMGCRetries))) {
-      tries++;
-      control_thread()->handle_alloc_failure(req);
-      result = allocate_memory_under_lock(req, in_new_region, is_promotion);
-    }
+
   } else {
     assert(req.is_gc_alloc(), "Can only accept GC allocs here");
     result = allocate_memory_under_lock(req, in_new_region, is_promotion);
