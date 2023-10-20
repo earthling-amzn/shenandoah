@@ -3341,7 +3341,7 @@ bool ShenandoahHeap::requires_barriers(stackChunkOop obj) const {
 }
 
 void ShenandoahHeap::transfer_old_pointers_from_satb() {
-  _old_generation->transfer_pointers_from_satb();
+//  _old_generation->transfer_pointers_from_satb();
 }
 
 template<>

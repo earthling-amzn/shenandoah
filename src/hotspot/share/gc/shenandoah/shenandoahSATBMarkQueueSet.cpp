@@ -45,6 +45,9 @@ public:
   // Return true if entry should be filtered out (removed), false if
   // it should be retained.
   bool operator()(const void* entry) const {
+    if (_heap->is_concurrent_old_mark_in_progress() && !_heap->is_concurrent_young_mark_in_progress() && _heap->is_in_young(entry)) {
+      return true;
+    }
     return !_heap->requires_marking(entry);
   }
 };
