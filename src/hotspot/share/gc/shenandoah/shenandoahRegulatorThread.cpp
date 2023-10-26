@@ -71,17 +71,15 @@ void ShenandoahRegulatorThread::regulate_concurrent_cycles() {
   while (!should_terminate()) {
     ShenandoahControlThread::GCMode mode = _control_thread->gc_mode();
     if (mode == ShenandoahControlThread::none) {
-      if (should_unload_classes()) {
+      if (_young_heuristics->should_start_gc()) {
+        if (start_old_cycle()) {
+          log_info(gc)("Heuristics request for old collection accepted");
+        } else if (request_concurrent_gc(YOUNG)) {
+          log_info(gc)("Heuristics request for young collection accepted");
+        }
+      } else if (should_unload_classes()) {
         if (request_concurrent_gc(ShenandoahControlThread::select_global_generation())) {
           log_info(gc)("Heuristics request for global (unload classes) accepted.");
-        }
-      } else {
-        if (_young_heuristics->should_start_gc()) {
-          if (start_old_cycle()) {
-            log_info(gc)("Heuristics request for old collection accepted");
-          } else if (request_concurrent_gc(YOUNG)) {
-            log_info(gc)("Heuristics request for young collection accepted");
-          }
         }
       }
     } else if (mode == ShenandoahControlThread::servicing_old) {
