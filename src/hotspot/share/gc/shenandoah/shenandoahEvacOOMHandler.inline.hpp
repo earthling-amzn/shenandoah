@@ -66,6 +66,23 @@ void ShenandoahEvacOOMHandler::leave_evacuation(Thread* thr) {
   unregister_thread(thr);
 }
 
+bool ShenandoahEvacOOMSimulator::fail_allocation() {
+  if (!ShenandoahOOMDuringEvacALot) {
+    return false;
+  }
+
+  jint already_triggered = Atomic::xchg(&_triggered_failure, 1);
+  return already_triggered == 0;
+}
+
+void ShenandoahEvacOOMSimulator::reset() {
+  _triggered_failure = 0;
+}
+
+bool ShenandoahEvacOOMHandler::simulate_allocation_failure() {
+  return _oom_simulator.fail_allocation();
+}
+
 ShenandoahEvacOOMScope::ShenandoahEvacOOMScope() :
   _thread(Thread::current()) {
   ShenandoahHeap::heap()->enter_evacuation(_thread);

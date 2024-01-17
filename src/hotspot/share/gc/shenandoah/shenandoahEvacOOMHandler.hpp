@@ -55,6 +55,16 @@ public:
   inline jint load_acquire();
 };
 
+class ShenandoahEvacOOMSimulator {
+private:
+  jint _triggered_failure;
+public:
+  ShenandoahEvacOOMSimulator() : _triggered_failure(false) {}
+
+  inline bool fail_allocation();
+  inline void reset();
+};
+
 /**
  * Provides safe handling of out-of-memory situations during evacuation.
  *
@@ -112,6 +122,7 @@ private:
 
   shenandoah_padding(0);
   ShenandoahEvacOOMCounter* _threads_in_evac;
+  ShenandoahEvacOOMSimulator _oom_simulator;
 
   ShenandoahEvacOOMCounter* counter_for_thread(Thread* t);
 
@@ -122,6 +133,8 @@ private:
   static int calc_num_counters();
 public:
   ShenandoahEvacOOMHandler();
+
+  inline bool simulate_allocation_failure();
 
   /**
    * Attempt to enter the protected evacuation path.

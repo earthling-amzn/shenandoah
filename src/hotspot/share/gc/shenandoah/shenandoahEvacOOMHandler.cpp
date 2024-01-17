@@ -181,6 +181,7 @@ void ShenandoahEvacOOMHandler::handle_out_of_memory_during_evacuation() {
 
 void ShenandoahEvacOOMHandler::clear() {
   assert(ShenandoahSafepoint::is_at_shenandoah_safepoint(), "must be at a safepoint");
+  _oom_simulator.reset();
   for (int i = 0; i < _num_counters; i++) {
     _threads_in_evac[i].clear();
   }

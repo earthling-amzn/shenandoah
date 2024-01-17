@@ -304,9 +304,8 @@ inline oop ShenandoahHeap::evacuate_object(oop p, Thread* thread) {
   HeapWord* copy = nullptr;
 
 #ifdef ASSERT
-  if (ShenandoahOOMDuringEvacALot &&
-      (os::random() & 1) == 0) { // Simulate OOM every ~2nd slow-path call
-        copy = nullptr;
+  if (_oom_evac_handler.simulate_allocation_failure()) {
+      copy = nullptr;
   } else {
 #endif
     if (UseTLAB) {
