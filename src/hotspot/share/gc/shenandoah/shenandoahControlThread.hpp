@@ -32,27 +32,7 @@
 #include "gc/shenandoah/shenandoahHeap.hpp"
 #include "gc/shenandoah/shenandoahPadding.hpp"
 #include "gc/shenandoah/shenandoahSharedVariables.hpp"
-#include "runtime/task.hpp"
 #include "utilities/ostream.hpp"
-
-// Periodic task is useful for doing asynchronous things that do not require (heap) locks,
-// or synchronization with other parts of collector. These could run even when ShenandoahConcurrentThread
-// is busy driving the GC cycle.
-class ShenandoahPeriodicTask : public PeriodicTask {
-private:
-  ShenandoahControlThread* _thread;
-public:
-  ShenandoahPeriodicTask(ShenandoahControlThread* thread) :
-          PeriodicTask(100), _thread(thread) {}
-  virtual void task();
-};
-
-// Periodic task to notify blocked paced waiters.
-class ShenandoahPeriodicPacerNotify : public PeriodicTask {
-public:
-  ShenandoahPeriodicPacerNotify() : PeriodicTask(PeriodicTask::min_interval) {}
-  virtual void task();
-};
 
 class ShenandoahControlThread: public ConcurrentGCThread {
   friend class VMStructs;
@@ -65,8 +45,6 @@ private:
   Monitor _gc_waiters_lock;
   Monitor _control_lock;
   Monitor _regulator_lock;
-  ShenandoahPeriodicTask _periodic_task;
-  ShenandoahPeriodicPacerNotify _periodic_pacer_notify_task;
 
 public:
   typedef enum {
@@ -86,14 +64,12 @@ public:
 private:
   ShenandoahSharedFlag _allow_old_preemption;
   ShenandoahSharedFlag _preemption_requested;
-  ShenandoahSharedFlag _gc_requested;
   ShenandoahSharedFlag _alloc_failure_gc;
   ShenandoahSharedFlag _humongous_alloc_failure_gc;
   ShenandoahSharedFlag _graceful_shutdown;
-  ShenandoahSharedFlag _do_counters_update;
-  ShenandoahSharedFlag _force_counters_update;
-  GCCause::Cause       _requested_gc_cause;
-  ShenandoahGenerationType _requested_generation;
+
+  GCCause::Cause  _requested_gc_cause;
+  volatile ShenandoahGenerationType _requested_generation;
   ShenandoahGC::ShenandoahDegenPoint _degen_point;
   ShenandoahGeneration* _degen_generation;
 
@@ -113,7 +89,6 @@ private:
   void service_concurrent_cycle(ShenandoahGeneration* generation, GCCause::Cause cause, bool reset_old_bitmap_specially);
   void service_stw_full_cycle(GCCause::Cause cause);
   void service_stw_degenerated_cycle(GCCause::Cause cause, ShenandoahGC::ShenandoahDegenPoint point);
-  void service_uncommit(double shrink_before, size_t shrink_until);
 
   // Return true if setting the flag which indicates allocation failure succeeds.
   bool try_set_alloc_failure_gc(bool is_humongous);
@@ -123,9 +98,6 @@ private:
 
   // True if allocation failure flag has been set.
   bool is_alloc_failure_gc();
-
-  // True if humongous allocation failure flag has been set.
-  bool is_humongous_alloc_failure_gc();
 
   void reset_gc_id();
   void update_gc_id();
@@ -142,15 +114,11 @@ private:
   // Returns true if the old generation marking was interrupted to allow a young cycle.
   bool preempt_old_marking(ShenandoahGenerationType generation);
 
-  // Returns true if the soft maximum heap has been changed using management APIs.
-  bool check_soft_max_changed() const;
-
   void process_phase_timings(const ShenandoahHeap* heap);
 
 public:
   // Constructor
   ShenandoahControlThread();
-  ~ShenandoahControlThread();
 
   // Handle allocation failure from a mutator allocation.
   // Optionally blocks while collector is handling the failure. If the GC
@@ -164,10 +132,6 @@ public:
   void request_gc(GCCause::Cause cause);
   // Return true if the request to start a concurrent GC for the given generation succeeded.
   bool request_concurrent_gc(ShenandoahGenerationType generation);
-
-  void handle_counters_update();
-  void handle_force_counters_update();
-  void set_forced_counters_update(bool value);
 
   void notify_heap_changed();
 

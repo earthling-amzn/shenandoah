@@ -24,6 +24,7 @@
 
 #include "precompiled.hpp"
 #include "gc/shenandoah/shenandoahCollectorPolicy.hpp"
+#include "gc/shenandoah/shenandoahCollectionSetPreselector.hpp"
 #include "gc/shenandoah/shenandoahFreeSet.hpp"
 #include "gc/shenandoah/shenandoahGeneration.hpp"
 #include "gc/shenandoah/shenandoahHeap.hpp"
@@ -223,19 +224,15 @@ void ShenandoahGeneration::prepare_gc() {
   parallel_heap_region_iterate(&cl);
 }
 
-void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* heap, bool* preselected_regions,
-                                                      ShenandoahCollectionSet* collection_set,
-                                                      size_t &consumed_by_advance_promotion) {
+void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* const heap) {
+
   size_t region_size_bytes = ShenandoahHeapRegion::region_size_bytes();
   size_t regions_available_to_loan = 0;
   size_t minimum_evacuation_reserve = ShenandoahOldCompactionReserve * region_size_bytes;
   size_t old_regions_loaned_for_young_evac = 0;
-  consumed_by_advance_promotion = 0;
 
-  ShenandoahGeneration* old_generation = heap->old_generation();
-  ShenandoahYoungGeneration* young_generation = heap->young_generation();
-  size_t old_evacuation_reserve = 0;
-  size_t num_regions = heap->num_regions();
+  ShenandoahGeneration* const old_generation = heap->old_generation();
+  ShenandoahYoungGeneration* const young_generation = heap->young_generation();
 
   // During initialization and phase changes, it is more likely that fewer objects die young and old-gen
   // memory is not yet full (or is in the process of being replaced).  During these times especially, it
@@ -253,45 +250,31 @@ void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* heap, bool
   // First priority is to reclaim the easy garbage out of young-gen.
 
   // maximum_young_evacuation_reserve is upper bound on memory to be evacuated out of young
-  size_t maximum_young_evacuation_reserve = (young_generation->max_capacity() * ShenandoahEvacReserve) / 100;
-  size_t young_evacuation_reserve = maximum_young_evacuation_reserve;
-  size_t excess_young;
+  const size_t maximum_young_evacuation_reserve = (young_generation->max_capacity() * ShenandoahEvacReserve) / 100;
+  const size_t young_evacuation_reserve = MIN2(maximum_young_evacuation_reserve, young_generation->available_with_reserve());
 
-  size_t total_young_available = young_generation->available_with_reserve();
-  if (total_young_available > young_evacuation_reserve) {
-    excess_young = total_young_available - young_evacuation_reserve;
-  } else {
-    young_evacuation_reserve = total_young_available;
-    excess_young = 0;
-  }
-  size_t unaffiliated_young = young_generation->free_unaffiliated_regions() * region_size_bytes;
-  if (excess_young > unaffiliated_young) {
-    excess_young = unaffiliated_young;
-  } else {
-    // round down to multiple of region size
-    excess_young /= region_size_bytes;
-    excess_young *= region_size_bytes;
-  }
-  // excess_young is available to be transferred to OLD.  Assume that OLD will not request any more than had
-  // already been set aside for its promotion and evacuation needs at the end of previous GC.  No need to
-  // hold back memory for allocation runway.
+  // maximum_old_evacuation_reserve is an upper bound on memory evacuated from old and evacuated to old (promoted),
+  // clamped by the old generation space available.
+  //
+  // Here's the algebra.
+  // Let SOEP = ShenandoahOldEvacRatioPercent,
+  //     OE = old evac,
+  //     YE = young evac, and
+  //     TE = total evac = OE + YE
+  // By definition:
+  //            SOEP/100 = OE/TE
+  //                     = OE/(OE+YE)
+  //  => SOEP/(100-SOEP) = OE/((OE+YE)-OE)         // componendo-dividendo: If a/b = c/d, then a/(b-a) = c/(d-c)
+  //                     = OE/YE
+  //  =>              OE = YE*SOEP/(100-SOEP)
 
-  // TODO: excess_young is unused.  Did we want to add it old_promo_reserve and/or old_evacuation_reserve?
+  // We have to be careful in the event that SOEP is set to 100 by the user.
+  assert(ShenandoahOldEvacRatioPercent <= 100, "Error");
+  const size_t old_available = old_generation->available();
+  const size_t maximum_old_evacuation_reserve = (ShenandoahOldEvacRatioPercent == 100) ?
+    old_available : MIN2((maximum_young_evacuation_reserve * ShenandoahOldEvacRatioPercent) / (100 - ShenandoahOldEvacRatioPercent),
+                          old_available);
 
-  ShenandoahOldHeuristics* old_heuristics = heap->old_heuristics();
-
-  // maximum_old_evacuation_reserve is an upper bound on memory evacuated from old and evacuated to old (promoted).
-  size_t maximum_old_evacuation_reserve =
-    maximum_young_evacuation_reserve * ShenandoahOldEvacRatioPercent / (100 - ShenandoahOldEvacRatioPercent);
-  // Here's the algebra:
-  //  TotalEvacuation = OldEvacuation + YoungEvacuation
-  //  OldEvacuation = TotalEvacuation * (ShenandoahOldEvacRatioPercent/100)
-  //  OldEvacuation = YoungEvacuation * (ShenandoahOldEvacRatioPercent/100)/(1 - ShenandoahOldEvacRatioPercent/100)
-  //  OldEvacuation = YoungEvacuation * ShenandoahOldEvacRatioPercent/(100 - ShenandoahOldEvacRatioPercent)
-
-  if (maximum_old_evacuation_reserve > old_generation->available()) {
-    maximum_old_evacuation_reserve = old_generation->available();
-  }
 
   // Second priority is to reclaim garbage out of old-gen if there are old-gen collection candidates.  Third priority
   // is to promote as much as we have room to promote.  However, if old-gen memory is in short supply, this means young
@@ -300,7 +283,8 @@ void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* heap, bool
   // through ALL of old-gen).  If there is some memory available in old-gen, we will use this for promotions as promotions
   // do not add to the update-refs burden of GC.
 
-  size_t old_promo_reserve;
+  ShenandoahOldHeuristics* const old_heuristics = heap->old_heuristics();
+  size_t old_evacuation_reserve, old_promo_reserve;
   if (is_global()) {
     // Global GC is typically triggered by user invocation of System.gc(), and typically indicates that there is lots
     // of garbage to be reclaimed because we are starting a new phase of execution.  Marking for global GC may take
@@ -328,28 +312,29 @@ void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* heap, bool
     old_evacuation_reserve = 0;
     old_promo_reserve = maximum_old_evacuation_reserve;
   }
+  assert(old_evacuation_reserve <= old_available, "Error");
 
   // We see too many old-evacuation failures if we force ourselves to evacuate into regions that are not initially empty.
   // So we limit the old-evacuation reserve to unfragmented memory.  Even so, old-evacuation is free to fill in nooks and
   // crannies within existing partially used regions and it generally tries to do so.
-  size_t old_free_regions = old_generation->free_unaffiliated_regions();
-  size_t old_free_unfragmented = old_free_regions * region_size_bytes;
+  const size_t old_free_unfragmented = old_generation->free_unaffiliated_regions() * region_size_bytes;
   if (old_evacuation_reserve > old_free_unfragmented) {
-    size_t delta = old_evacuation_reserve - old_free_unfragmented;
+    const size_t delta = old_evacuation_reserve - old_free_unfragmented;
     old_evacuation_reserve -= delta;
-
     // Let promo consume fragments of old-gen memory if not global
     if (!is_global()) {
       old_promo_reserve += delta;
     }
   }
-  collection_set->establish_preselected(preselected_regions);
-  consumed_by_advance_promotion = select_aged_regions(old_promo_reserve, num_regions, preselected_regions);
+
+  // Preselect regions for promotion by evacuation (obtaining the live data to seed promoted_reserve),
+  // and identify regions that will promote in place. These use the tenuring threshold.
+  size_t consumed_by_advance_promotion = select_aged_regions(old_promo_reserve);
   assert(consumed_by_advance_promotion <= maximum_old_evacuation_reserve, "Cannot promote more than available old-gen memory");
 
   // Note that unused old_promo_reserve might not be entirely consumed_by_advance_promotion.  Do not transfer this
   // to old_evacuation_reserve because this memory is likely very fragmented, and we do not want to increase the likelihood
-  // of old evacuatino failure.
+  // of old evacuation failure.
 
   heap->set_young_evac_reserve(young_evacuation_reserve);
   heap->set_old_evac_reserve(old_evacuation_reserve);
@@ -361,9 +346,8 @@ void ShenandoahGeneration::compute_evacuation_budgets(ShenandoahHeap* heap, bool
 
 // Having chosen the collection set, adjust the budgets for generational mode based on its composition.  Note
 // that young_generation->available() now knows about recently discovered immediate garbage.
-
-void ShenandoahGeneration::adjust_evacuation_budgets(ShenandoahHeap* heap, ShenandoahCollectionSet* collection_set,
-                                                     size_t consumed_by_advance_promotion) {
+//
+void ShenandoahGeneration::adjust_evacuation_budgets(ShenandoahHeap* const heap, ShenandoahCollectionSet* const collection_set) {
   // We may find that old_evacuation_reserve and/or loaned_for_young_evacuation are not fully consumed, in which case we may
   //  be able to increase regions_available_to_loan
 
@@ -380,11 +364,8 @@ void ShenandoahGeneration::adjust_evacuation_budgets(ShenandoahHeap* heap, Shena
   // to young-gen.
 
   size_t region_size_bytes = ShenandoahHeapRegion::region_size_bytes();
-  ShenandoahOldGeneration* old_generation = heap->old_generation();
-  ShenandoahYoungGeneration* young_generation = heap->young_generation();
-
-  // Preselected regions have been inserted into the collection set, so we no longer need the preselected array.
-  collection_set->abandon_preselected();
+  const ShenandoahOldGeneration* const old_generation = heap->old_generation();
+  const ShenandoahYoungGeneration* const young_generation = heap->young_generation();
 
   size_t old_evacuated = collection_set->get_old_bytes_reserved_for_evacuation();
   size_t old_evacuated_committed = (size_t) (ShenandoahOldEvacWaste * old_evacuated);
@@ -508,7 +489,7 @@ inline void assert_no_in_place_promotions() {
 
 // Preselect for inclusion into the collection set regions whose age is at or above tenure age which contain more than
 // ShenandoahOldGarbageThreshold amounts of garbage.  We identify these regions by setting the appropriate entry of
-// candidate_regions_for_promotion_by_copy[] to true.  All entries are initialized to false before calling this
+// the collection set's preselected regions array to true.  All entries are initialized to false before calling this
 // function.
 //
 // During the subsequent selection of the collection set, we give priority to these promotion set candidates.
@@ -520,44 +501,47 @@ inline void assert_no_in_place_promotions() {
 //
 // A second benefit of treating aged regions differently than other regions during collection set selection is
 // that this allows us to more accurately budget memory to hold the results of evacuation.  Memory for evacuation
-// of aged regions must be reserved in the old generations.  Memory for evacuation of all other regions must be
+// of aged regions must be reserved in the old generation.  Memory for evacuation of all other regions must be
 // reserved in the young generation.
-size_t ShenandoahGeneration::select_aged_regions(size_t old_available, size_t num_regions,
-                                                 bool candidate_regions_for_promotion_by_copy[]) {
+size_t ShenandoahGeneration::select_aged_regions(size_t old_available) {
 
   // There should be no regions configured for subsequent in-place-promotions carried over from the previous cycle.
   assert_no_in_place_promotions();
 
-  ShenandoahHeap* heap = ShenandoahHeap::heap();
+  ShenandoahHeap* const heap = ShenandoahHeap::heap();
   assert(heap->mode()->is_generational(), "Only in generational mode");
+  bool* const candidate_regions_for_promotion_by_copy = heap->collection_set()->preselected_regions();
   ShenandoahMarkingContext* const ctx = heap->marking_context();
 
   const uint tenuring_threshold = heap->age_census()->tenuring_threshold();
+  const size_t old_garbage_threshold = (ShenandoahHeapRegion::region_size_bytes() * ShenandoahOldGarbageThreshold) / 100;
 
   size_t old_consumed = 0;
   size_t promo_potential = 0;
-
-  heap->clear_promotion_potential();
   size_t candidates = 0;
-  size_t candidates_live = 0;
-  size_t old_garbage_threshold = (ShenandoahHeapRegion::region_size_bytes() * ShenandoahOldGarbageThreshold) / 100;
-  size_t promote_in_place_regions = 0;
-  size_t promote_in_place_live = 0;
-  size_t promote_in_place_pad = 0;
-  size_t anticipated_candidates = 0;
-  size_t anticipated_promote_in_place_regions = 0;
 
-  // Sort the promotion-eligible regions according to live-data-bytes so that we can first reclaim regions that require
-  // less evacuation effort.  This prioritizes garbage first, expanding the allocation pool before we begin the work of
-  // reclaiming regions that require more effort.
-  AgedRegionData* sorted_regions = (AgedRegionData*) alloca(num_regions * sizeof(AgedRegionData));
+  // Tracks the padding of space above top in regions eligible for promotion in place
+  size_t promote_in_place_pad = 0;
+
+  // Sort the promotion-eligible regions in order of increasing live-data-bytes so that we can first reclaim regions that require
+  // less evacuation effort.  This prioritizes garbage first, expanding the allocation pool early before we reclaim regions that
+  // have more live data.
+  const size_t num_regions = heap->num_regions();
+
+  ResourceMark rm;
+  AgedRegionData* sorted_regions = NEW_RESOURCE_ARRAY(AgedRegionData, num_regions);
+
   for (size_t i = 0; i < num_regions; i++) {
-    ShenandoahHeapRegion* r = heap->get_region(i);
+    ShenandoahHeapRegion* const r = heap->get_region(i);
     if (r->is_empty() || !r->has_live() || !r->is_young() || !r->is_regular()) {
+      // skip over regions that aren't regular young with some live data
       continue;
     }
     if (r->age() >= tenuring_threshold) {
       if ((r->garbage() < old_garbage_threshold)) {
+        // This tenure-worthy region has too little garbage, so we do not want to expend the copying effort to
+        // reclaim the garbage; instead this region may be eligible for promotion-in-place to the
+        // old generation.
         HeapWord* tams = ctx->top_at_mark_start(r);
         HeapWord* original_top = r->top();
         if (!heap->is_concurrent_old_mark_in_progress() && tams == original_top) {
@@ -579,26 +563,23 @@ size_t ShenandoahGeneration::select_aged_regions(size_t old_available, size_t nu
             // Since the remnant is so small that it cannot be filled, we don't have to worry about any accidental
             // allocations occurring within this region before the region is promoted in place.
           }
-          promote_in_place_regions++;
-          promote_in_place_live += r->get_live_data_bytes();
         }
         // Else, we do not promote this region (either in place or by copy) because it has received new allocations.
 
         // During evacuation, we exclude from promotion regions for which age > tenure threshold, garbage < garbage-threshold,
         //  and get_top_before_promote() != tams
       } else {
-        // After sorting and selecting best candidates below, we may decide to exclude this promotion-eligible region
-        // from the current collection sets.  If this happens, we will consider this region as part of the anticipated
-        // promotion potential for the next GC pass.
-        size_t live_data = r->get_live_data_bytes();
-        candidates_live += live_data;
+        // Record this promotion-eligible candidate region. After sorting and selecting the best candidates below,
+        // we may still decide to exclude this promotion-eligible region from the current collection set.  If this
+        // happens, we will consider this region as part of the anticipated promotion potential for the next GC
+        // pass; see further below.
         sorted_regions[candidates]._region = r;
-        sorted_regions[candidates++]._live_data = live_data;
+        sorted_regions[candidates++]._live_data = r->get_live_data_bytes();
       }
     } else {
-      // We only anticipate to promote regular regions if garbage() is above threshold.  Tenure-aged regions with less
-      // garbage are promoted in place.  These take a different path to old-gen.  Note that certain regions that are
-      // excluded from anticipated promotion because their garbage content is too low (causing us to anticipate that
+      // We only evacuate & promote objects from regular regions whose garbage() is above old-garbage-threshold.
+      // Objects in tenure-worthy regions with less garbage are promoted in place. These take a different path to
+      // old-gen.  Regions excluded from promotion because their garbage content is too low (causing us to anticipate that
       // the region would be promoted in place) may be eligible for evacuation promotion by the time promotion takes
       // place during a subsequent GC pass because more garbage is found within the region between now and then.  This
       // should not happen if we are properly adapting the tenure age.  The theory behind adaptive tenuring threshold
@@ -618,11 +599,7 @@ size_t ShenandoahGeneration::select_aged_regions(size_t old_available, size_t nu
       //   the tenure age can be increased.
       if (heap->is_aging_cycle() && (r->age() + 1 == tenuring_threshold)) {
         if (r->garbage() >= old_garbage_threshold) {
-          anticipated_candidates++;
           promo_potential += r->get_live_data_bytes();
-        }
-        else {
-          anticipated_promote_in_place_regions++;
         }
       }
     }
@@ -636,10 +613,10 @@ size_t ShenandoahGeneration::select_aged_regions(size_t old_available, size_t nu
     size_t selected_live = 0;
     QuickSort::sort<AgedRegionData>(sorted_regions, candidates, compare_by_aged_live, false);
     for (size_t i = 0; i < candidates; i++) {
+      ShenandoahHeapRegion* const region = sorted_regions[i]._region;
       size_t region_live_data = sorted_regions[i]._live_data;
       size_t promotion_need = (size_t) (region_live_data * ShenandoahPromoEvacWaste);
       if (old_consumed + promotion_need <= old_available) {
-        ShenandoahHeapRegion* region = sorted_regions[i]._region;
         old_consumed += promotion_need;
         candidate_regions_for_promotion_by_copy[region->index()] = true;
         selected_regions++;
@@ -648,6 +625,7 @@ size_t ShenandoahGeneration::select_aged_regions(size_t old_available, size_t nu
         // We rejected this promotable region from the collection set because we had no room to hold its copy.
         // Add this region to promo potential for next GC.
         promo_potential += region_live_data;
+        assert(!candidate_regions_for_promotion_by_copy[region->index()], "Shouldn't be selected");
       }
       // We keep going even if one region is excluded from selection because we need to accumulate all eligible
       // regions that are not preselected into promo_potential
@@ -708,11 +686,10 @@ void ShenandoahGeneration::prepare_regions_and_collection_set(bool concurrent) {
     collection_set->clear();
     ShenandoahHeapLocker locker(heap->lock());
     if (is_generational) {
-      size_t consumed_by_advance_promotion;
-      bool* preselected_regions = (bool*) alloca(heap->num_regions() * sizeof(bool));
-      for (unsigned int i = 0; i < heap->num_regions(); i++) {
-        preselected_regions[i] = false;
-      }
+      // Seed the collection set with resource area-allocated
+      // preselected regions, which are removed when we exit this scope.
+      ResourceMark rm;
+      ShenandoahCollectionSetPreselector preselector(collection_set, heap->num_regions());
 
       // TODO: young_available can include available (between top() and end()) within each young region that is not
       // part of the collection set.  Making this memory available to the young_evacuation_reserve allows a larger
@@ -722,12 +699,16 @@ void ShenandoahGeneration::prepare_regions_and_collection_set(bool concurrent) {
       // non-empty regions that are not selected as part of the collection set can be allocated by the mutator while
       // GC is evacuating and updating references.
 
-      // Budgeting parameters to compute_evacuation_budgets are passed by reference.
-      compute_evacuation_budgets(heap, preselected_regions, collection_set, consumed_by_advance_promotion);
+      // Find the amount that will be promoted, regions that will be promoted in
+      // place, and preselect older regions that will be promoted by evacuation.
+      compute_evacuation_budgets(heap);
+
+      // Choose the collection set, including the regions preselected above for
+      // promotion into the old generation.
       _heuristics->choose_collection_set(collection_set);
       if (!collection_set->is_empty()) {
         // only make use of evacuation budgets when we are evacuating
-        adjust_evacuation_budgets(heap, collection_set, consumed_by_advance_promotion);
+        adjust_evacuation_budgets(heap, collection_set);
       }
 
       if (is_global()) {
@@ -770,7 +751,7 @@ void ShenandoahGeneration::prepare_regions_and_collection_set(bool concurrent) {
 bool ShenandoahGeneration::is_bitmap_clear() {
   ShenandoahHeap* heap = ShenandoahHeap::heap();
   ShenandoahMarkingContext* context = heap->marking_context();
-  size_t num_regions = heap->num_regions();
+  const size_t num_regions = heap->num_regions();
   for (size_t idx = 0; idx < num_regions; idx++) {
     ShenandoahHeapRegion* r = heap->get_region(idx);
     if (contains(r) && r->is_affiliated()) {
