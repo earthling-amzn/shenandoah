@@ -30,7 +30,7 @@ jobs:
         run: |
           git remote add upstream https://github.com/openjdk/jdk.git
           git fetch upstream
-          echo "latest=$(git tag --list --sort=-creatordate | head -1)" >> "$GITHUB_OUTPUT"
+          echo "latest=$(git tag --list --sort=-creatordate | grep jdk-24 | head -1)" >> "$GITHUB_OUTPUT"
       - name: Reset the default branch with latest tag
         run: |
           git reset --hard ${{ steps.latest-tag.outputs.latest }}
