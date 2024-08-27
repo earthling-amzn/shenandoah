@@ -379,7 +379,7 @@ template <class T, bool HAS_FWD, bool EVAC, bool ENQUEUE>
 void ShenandoahBarrierSet::arraycopy_work(T* src, size_t count) {
   // We allow forwarding in young generation and marking in old generation
   // to happen simultaneously.
-  assert(_heap->mode()->is_generational() || HAS_FWD == _heap->has_forwarded_objects(), "Forwarded object status is sane");
+  assert(ENQUEUE == _heap->is_concurrent_mark_in_progress() || HAS_FWD == _heap->has_forwarded_objects(), "Barrier mode out of sync with heap state");
 
   Thread* thread = Thread::current();
   SATBMarkQueue& queue = ShenandoahThreadLocalData::satb_mark_queue(thread);
