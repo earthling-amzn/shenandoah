@@ -925,7 +925,7 @@ void ShenandoahBarrierSetAssembler::gen_write_ref_array_post_barrier(MacroAssemb
   __ shrptr(end, CardTable::card_shift());
   __ subptr(end, addr); // end --> cards count
 
-  __ mov64(tmp, disp);
+  __ movptr(tmp, disp);
   __ addptr(addr, tmp);
 
   __ BIND(L_loop);
