@@ -570,17 +570,12 @@ ShenandoahHeapRegion* ShenandoahHeapRegion::humongous_start_region() const {
 }
 
 void ShenandoahHeapRegion::recycle() {
-  shenandoah_assert_heaplocked();
   ShenandoahHeap* heap = ShenandoahHeap::heap();
   ShenandoahGeneration* generation = heap->generation_for(affiliation());
 
-  heap->decrease_used(generation, used());
-  generation->decrement_affiliated_region_count();
-
   set_top(bottom());
+  set_update_watermark(bottom());
   clear_live_data();
-  heap->marking_context()->clear_bitmap(this);
-
   reset_alloc_metadata();
 
   heap->marking_context()->reset_top_at_mark_start(this);
@@ -588,13 +583,16 @@ void ShenandoahHeapRegion::recycle() {
     heap->marking_context()->clear_bitmap(this);
   }
 
-  set_update_watermark(bottom());
-
-  make_empty();
-
-  set_affiliation(FREE);
   if (ZapUnusedHeapArea) {
     SpaceMangler::mangle_region(MemRegion(bottom(), end()));
+  }
+
+  {
+    ShenandoahHeapLocker locker(heap->lock());
+    heap->decrease_used(generation, used());
+    generation->decrement_affiliated_region_count();
+    make_empty();
+    set_affiliation(FREE);
   }
 }
 

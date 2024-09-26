@@ -1228,25 +1228,27 @@ void ShenandoahFreeSet::recycle_trash() {
   // lock is not reentrable, check we don't have it
   shenandoah_assert_not_heaplocked();
 
-  size_t count = 0;
-  for (size_t i = 0; i < _heap->num_regions(); i++) {
-    ShenandoahHeapRegion* r = _heap->get_region(i);
-    if (r->is_trash()) {
-      _trash_regions[count++] = r;
-    }
-  }
+  class ShenandoahRegionRecycler : public WorkerTask {
+  private:
+    ShenandoahRegionIterator* _regions;
+  public:
+    ShenandoahRegionRecycler(ShenandoahRegionIterator* regions) :
+      WorkerTask("Shenandoah Recycle Regions"),
+      _regions(regions) {}
 
-  // Relinquish the lock after this much time passed.
-  static constexpr jlong deadline_ns = 30000; // 30 us
-  size_t idx = 0;
-  while (idx < count) {
-    os::naked_yield(); // Yield to allow allocators to take the lock
-    ShenandoahHeapLocker locker(_heap->lock());
-    const jlong deadline = os::javaTimeNanos() + deadline_ns;
-    while (idx < count && os::javaTimeNanos() < deadline) {
-      try_recycle_trashed(_trash_regions[idx++]);
+    void work(uint worker_id) override {
+      if (worker_id == 0) {
+        ShenandoahHeapRegion* region;
+        while ((region = _regions->next()) != nullptr) {
+          ShenandoahFreeSet::try_recycle_trashed(region);
+        }
+      }
     }
-  }
+  };
+
+  ShenandoahRegionIterator regions;
+  ShenandoahRegionRecycler recycler(&regions);
+  ShenandoahHeap::heap()->workers()->run_task(&recycler);
 }
 
 void ShenandoahFreeSet::flip_to_old_gc(ShenandoahHeapRegion* r) {
