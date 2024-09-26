@@ -1237,9 +1237,10 @@ void ShenandoahFreeSet::recycle_trash() {
       _regions(regions) {}
 
     void work(uint worker_id) override {
-      if (worker_id == 0) {
-        ShenandoahHeapRegion* region;
-        while ((region = _regions->next()) != nullptr) {
+      ShenandoahHeapRegion* region;
+      while ((region = _regions->next()) != nullptr) {
+        if (region->is_trash()) {
+          ShenandoahHeapLocker locker(ShenandoahHeap::heap()->lock());
           ShenandoahFreeSet::try_recycle_trashed(region);
         }
       }

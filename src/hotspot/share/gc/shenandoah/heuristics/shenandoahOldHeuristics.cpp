@@ -637,10 +637,7 @@ bool ShenandoahOldHeuristics::should_start_gc() {
   if (_fragmentation_trigger) {
     const size_t used = _old_generation->used();
     const size_t used_regions_size = _old_generation->used_regions_size();
-
-    // used_regions includes humongous regions
-    const size_t used_regions = _old_generation->used_regions();
-    assert(used_regions_size > used_regions, "Cannot have more used than used regions");
+    assert(used_regions_size > used, "Cannot have more used than the size of the used regions");
 
     size_t first_old_region, last_old_region;
     double density;

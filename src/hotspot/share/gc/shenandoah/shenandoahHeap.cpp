@@ -694,20 +694,24 @@ void ShenandoahHeap::increase_used(const ShenandoahAllocRequest& req) {
 
   if (req.is_gc_alloc()) {
     assert(wasted_bytes == 0 || req.type() == ShenandoahAllocRequest::_alloc_plab, "Only PLABs have waste");
+    ShenandoahHeapLocker locker(lock());
     increase_used(generation, actual_bytes + wasted_bytes);
   } else {
     assert(req.is_mutator_alloc(), "Expected mutator alloc here");
     // padding and actual size both count towards allocation counter
     generation->increase_allocated(actual_bytes + wasted_bytes);
 
-    // only actual size counts toward usage for mutator allocations
-    increase_used(generation, actual_bytes);
-
     // notify pacer of both actual size and waste
     notify_mutator_alloc_words(req.actual_size(), req.waste());
 
-    if (wasted_bytes > 0 && ShenandoahHeapRegion::requires_humongous(req.actual_size())) {
-      increase_humongous_waste(generation,wasted_bytes);
+    {
+      ShenandoahHeapLocker locker(lock());
+      // only actual size counts toward usage for mutator allocations
+      increase_used(generation, actual_bytes);
+
+      if (wasted_bytes > 0 && ShenandoahHeapRegion::requires_humongous(req.actual_size())) {
+        increase_humongous_waste(generation,wasted_bytes);
+      }
     }
   }
 }
