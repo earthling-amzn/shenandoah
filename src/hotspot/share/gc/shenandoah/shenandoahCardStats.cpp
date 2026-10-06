@@ -38,4 +38,3 @@ void ShenandoahCardStats::log() const {
   }
 }
 #endif // !PRODUCT
-

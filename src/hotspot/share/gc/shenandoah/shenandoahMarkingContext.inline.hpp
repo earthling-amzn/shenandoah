@@ -29,8 +29,8 @@
 
 #include "gc/shenandoah/shenandoahMarkingContext.hpp"
 
-#include "gc/shenandoah/shenandoahHeap.hpp"
-#include "gc/shenandoah/shenandoahHeapRegion.hpp"
+#include "gc/shenandoah/shenandoahHeap.inline.hpp"
+#include "gc/shenandoah/shenandoahHeapRegion.inline.hpp"
 #include "gc/shenandoah/shenandoahMarkBitMap.inline.hpp"
 #include "logging/log.hpp"
 #include "oops/oopsHierarchy.hpp"

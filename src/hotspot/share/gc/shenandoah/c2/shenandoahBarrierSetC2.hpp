@@ -32,19 +32,10 @@
 #include "utilities/debug.hpp"
 #include "utilities/globalDefinitions.hpp"
 
-class Arena;
 class ArrayCopyNode;
-class CodeBuffer;
-class Compile;
 class GraphKit;
 template <typename> class GrowableArray;
-class MacroAssembler;
-class Node;
-class outputStream;
-class PhaseIterGVN;
 class PhaseMacroExpand;
-class Type;
-class TypeOopPtr;
 
 static const uint8_t ShenandoahBitStrong    = 1 << 0; // Barrier: LRB, strong
 static const uint8_t ShenandoahBitWeak      = 1 << 1; // Barrier: LRB, weak

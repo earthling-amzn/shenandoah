@@ -52,7 +52,6 @@
 #include "oops/oopsHierarchy.hpp"
 #include "runtime/atomic.hpp"
 #include "services/memoryManager.hpp"
-#include "services/memoryPool.hpp"
 #include "services/memoryUsage.hpp"
 #include "utilities/debug.hpp"
 #include "utilities/exceptions.hpp"
@@ -66,6 +65,7 @@ class ConcurrentGCTimer;
 class GCTracer;
 class JavaThread;
 class Klass;
+class MemoryPool;
 class nmethod;
 class ObjectClosure;
 class ObjectIterateScanRootClosure;

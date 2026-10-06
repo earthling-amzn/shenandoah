@@ -34,7 +34,6 @@
 #include "memory/allocation.hpp"
 #include "memory/iterator.hpp"
 #include "runtime/atomic.hpp"
-#include "runtime/javaThread.hpp"
 #include "runtime/threads.hpp"
 #include "runtime/threadSMR.hpp"
 #include "utilities/globalDefinitions.hpp"

@@ -278,4 +278,3 @@ int BinaryMagnitudeSeq::max_level() const {
   }
   return 0;
 }
-

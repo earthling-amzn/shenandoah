@@ -3041,4 +3041,3 @@ double ShenandoahFreeSet::external_fragmentation() {
     return 0;
   }
 }
-
